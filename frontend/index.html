@@ -1,0 +1,296 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <title>Generar QR Interoperable</title>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600&display=swap');
+
+    body {
+      font-family: 'Inter', sans-serif;
+      background-color: #f8f9fb;
+      color: #333;
+      padding: 2rem;
+      max-width: 600px;
+      margin: auto;
+    }
+
+    h1 {
+      color: #5f2eea;
+      font-size: 1.8rem;
+      margin-bottom: 1rem;
+    }
+
+    input, button {
+      width: 100%;
+      padding: 0.75rem;
+      margin-top: 0.5rem;
+      margin-bottom: 1rem;
+      border-radius: 8px;
+      border: 1px solid #ccc;
+      font-size: 1rem;
+    }
+
+    button {
+      background-color: #5f2eea;
+      color: white;
+      border: none;
+      cursor: pointer;
+      transition: background 0.3s;
+    }
+
+    button:hover {
+      background-color: #4a23c8;
+    }
+
+    #qr img {
+      margin-top: 1rem;
+      width: 256px;
+      height: 256px;
+    }
+
+    #estado.pago-confirmado {
+      background-color: #d4edda;
+      color: #155724;
+      border: 1px solid #c3e6cb;
+      padding: 1rem;
+      border-radius: 5px;
+      animation: fadeIn 0.5s ease-in-out;
+      margin-top: 1rem;
+    }
+
+    @keyframes fadeIn {
+      from { opacity: 0; transform: scale(0.95); }
+      to { opacity: 1; transform: scale(1); }
+    }
+
+    #historial {
+      margin-top: 2rem;
+    }
+
+    #lista-transacciones li {
+      background: white;
+      border-radius: 8px;
+      padding: 0.75rem;
+      margin-bottom: 0.5rem;
+      box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+      display: flex;
+      flex-direction: column;
+    }
+
+    .estado-badge {
+      padding: 0.25rem 0.6rem;
+      border-radius: 12px;
+      font-size: 0.75rem;
+      font-weight: bold;
+      display: inline-block;
+      margin-left: 0.5rem;
+    }
+
+    .pendiente { background-color: #fff3cd; color: #856404; }
+    .pagado { background-color: #d4edda; color: #155724; }
+    .expirado { background-color: #f8d7da; color: #721c24; }
+  </style>
+</head>
+<body>
+  <h1>Panel del Comercio</h1>
+  <p>Alias: <strong>comercio.wibond</strong></p>
+
+  <label for="monto">Monto:</label>
+  <input type="number" id="monto" placeholder="1000.00">
+
+  <button onclick="generarQR()">Generar QR</button>
+
+  <div id="qr"></div>
+  <div id="estado"></div>
+  <div id="acciones"></div>
+
+  <hr>
+  <div id="historial">
+    <h3>Últimas transacciones</h3>
+    <ul id="lista-transacciones"></ul>
+  </div>
+
+  <script type="text/javascript">
+    const comercioAlias = "comercio.wibond";
+    let transaccionID = null;
+
+    async function generarQR() {
+      const monto = parseFloat(document.getElementById('monto').value);
+
+      if (isNaN(monto) || monto <= 0) {
+        alert("El monto debe ser un número mayor a cero.");
+        return;
+      }
+
+      try {
+        const res = await fetch('http://localhost:8080/generar-qr', {
+          method: 'POST',
+          mode: 'cors',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': 'Bearer mipassword123'
+          },
+          body: JSON.stringify({ alias: comercioAlias, monto })
+        });
+
+        if (!res.ok) throw new Error("Error al generar el QR");
+        const data = await res.json();
+        transaccionID = data.id;
+
+        document.getElementById('qr').innerHTML = `
+          <h3>QR generado (ID ${data.id}):</h3>
+          <img src="data:image/png;base64,${data.qr_base64}" />
+          <p><b>Payload:</b> ${data.payload}</p>
+        `;
+
+        document.getElementById('estado').innerText = 'Estado: pendiente';
+        document.getElementById('acciones').innerHTML = `
+          <button id="btnSimular" onclick="simularPago()">Simular pago</button>
+          <button onclick="consultarEstado()">Consultar estado</button>
+        `;
+
+        mostrarUltimasTransacciones();
+      } catch (err) {
+        alert("Error generando QR: " + err.message);
+      }
+    }
+
+    async function consultarEstado() {
+      if (!transaccionID) return;
+
+      try {
+        const res = await fetch(`http://localhost:8080/estado-pago/${transaccionID}`);
+        if (!res.ok) {
+          if (res.status === 404) {
+            console.warn("Transacción eliminada, deteniendo actualización.");
+            transaccionID = null;  // ← Evita que se siga consultando
+            document.getElementById("estado").innerText = "⚠️ Transacción no encontrada.";
+          }
+          return;
+        }
+
+        const data = await res.json();
+        const estado = data.estado;
+
+        const estadoDiv = document.getElementById('estado');
+        estadoDiv.innerText = 'Estado: ' + estado;
+
+        const btnSimular = document.getElementById('btnSimular');
+        if (btnSimular && (estado === 'expirado' || estado === 'pagado')) {
+          btnSimular.disabled = true;
+        }
+
+        if (estado === 'pagado') {
+          estadoDiv.innerText = `✅ ¡Pago recibido! (ID ${transaccionID})`;
+          estadoDiv.classList.add('pago-confirmado');
+        } else if (estado === 'expirado') {
+          estadoDiv.innerHTML = `❌ QR expirado (ID ${transaccionID})`;
+          estadoDiv.className = 'pago-confirmado';
+          estadoDiv.style.backgroundColor = '#f8d7da';
+          estadoDiv.style.color = '#721c24';
+          estadoDiv.style.border = '1px solid #f5c6cb';
+        } else {
+          estadoDiv.classList.remove('pago-confirmado');
+        }
+
+        mostrarUltimasTransacciones();
+
+      } catch (error) {
+        console.error("Error consultando estado:", error);
+      }
+    }
+
+    async function simularPago() {
+      if (!transaccionID) return;
+      await fetch(`http://localhost:8080/simular-pago/${transaccionID}`, {
+        method: 'POST',
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": "Bearer mipassword123"
+        },
+        body: JSON.stringify({ cliente_alias: "cliente.index" })
+      });
+      consultarEstado();
+    }
+
+    async function mostrarUltimasTransacciones() {
+      const res = await fetch("http://localhost:8080/todas-transacciones", {
+        headers: { 'Authorization': 'Bearer mipassword123' }
+      });
+      const data = await res.json();
+
+      const lista = document.getElementById("lista-transacciones");
+      lista.innerHTML = "";
+
+      const ultimas = data.slice(-5).reverse();
+
+      ultimas.forEach(tx => {
+        const li = document.createElement("li");
+
+        const estadoClass = {
+          "pendiente": "pendiente",
+          "pagado": "pagado",
+          "expirado": "expirado"
+        }[tx.Estado] || "pendiente";
+
+        let info = `
+          <div><strong>ID:</strong> ${tx.ID}</div>
+          <div><strong>Comercio:</strong> ${tx.Alias}</div>
+          <div><strong>Monto:</strong> $${tx.Monto}</div>
+          <div><strong>Estado:</strong> <span class="estado-badge ${estadoClass}">${tx.Estado}</span></div>
+        `;
+
+        if (tx.Estado === "pagado" && tx.ClienteAlias) {
+          info += `<div><strong>Cliente:</strong> ${tx.ClienteAlias}</div>`;
+        }
+
+        li.innerHTML = info;
+
+        if (tx.Estado === "pendiente") {
+          const btn = document.createElement("button");
+          btn.textContent = "Simular pago";
+          btn.onclick = async () => {
+            await fetch(`http://localhost:8080/simular-pago/${tx.ID}`, {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                "Authorization": "Bearer mipassword123"
+              },
+              body: JSON.stringify({ cliente_alias: "cliente.index" })
+            });
+            mostrarUltimasTransacciones();
+            if (tx.ID === transaccionID) consultarEstado();
+          };
+          li.appendChild(btn);
+        }
+
+        const btnEliminar = document.createElement("button");
+        btnEliminar.textContent = "🗑️ Eliminar";
+        btnEliminar.onclick = async () => {
+          const confirmacion = confirm(`¿Seguro que querés eliminar la transacción ID ${tx.ID}?`);
+          if (!confirmacion) return;
+
+          await fetch(`http://localhost:8080/eliminar-transaccion/${tx.ID}`, {
+            method: "DELETE",
+            headers: {
+              "Authorization": "Bearer mipassword123"
+            }
+          });
+
+          mostrarUltimasTransacciones();
+        };
+        li.appendChild(btnEliminar);
+
+        lista.appendChild(li);
+      });
+    }
+
+    setInterval(() => {
+      if (transaccionID) consultarEstado();
+    }, 5000);
+
+    mostrarUltimasTransacciones();
+  </script>
+</body>
+</html>
