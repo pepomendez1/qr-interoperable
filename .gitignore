@@ -1,0 +1,12 @@
+# Go
+bin/
+*.exe
+*.test
+*.out
+
+# Node / Frontend (si lo usás)
+node_modules/
+dist/
+
+# Editor
+.vscode/
