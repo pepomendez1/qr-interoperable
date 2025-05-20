@@ -2,7 +2,7 @@
 <html lang="es">
 <head>
   <meta charset="UTF-8">
-  <title>Simulador de Cliente</title>
+  <title>Simulador de Billetera</title>
   <style>
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600&display=swap');
 
@@ -54,72 +54,62 @@
   </style>
 </head>
 <body>
-  <h1>Simulador de Cliente</h1>
-  <p>Alias: <strong>cliente.demo</strong></p>
+  <h1>Simulador de Billetera</h1>
+  <p>Alias de esta billetera: <strong>cliente.demo</strong></p>
 
+  <label for="qrId">QR ID escaneado (ej: qr-1747...):</label>
+  <input type="text" id="qrId" placeholder="qr-1747...">
 
-    <label for="qrId">ID del QR escaneado:</label>
-    <input type="number" id="qrId" placeholder="Ej: 12">
-
-
-  <button onclick="consultarEstado()">Consultar estado</button>
-  <button onclick="simularPago()">Simular pago</button>
+  <button onclick="resolverQR()">📄 Resolver QR</button>
 
   <div id="resultado"></div>
 
   <script>
-    const clienteAlias = "cliente.demo"; // dinámico más adelante
-    async function consultarEstado() {
-      const id = document.getElementById("qrId").value;
-      if (!id) return alert("Ingresá un ID válido");
+    const clienteAlias = "cliente.demo";
 
-      const res = await fetch(`http://localhost:8080/estado-pago/${id}`);
+    async function resolverQR() {
+      const qrId = document.getElementById("qrId").value;
+      if (!qrId) return alert("Ingresá un qr_id válido");
+
+      const res = await fetch(`http://localhost:8080/resolve-qr/${qrId}`);
+      if (!res.ok) {
+        document.getElementById("resultado").innerHTML = "❌ QR no encontrado o expirado.";
+        return;
+      }
+
       const data = await res.json();
 
+      document.getElementById("resultado").innerHTML = `
+        <p><strong>Comercio:</strong> ${data.comercio.nombre}</p>
+        <p><strong>CUIT:</strong> ${data.comercio.cuit}</p>
+        <p><strong>Monto:</strong> $${data.monto}</p>
+        <button onclick="simularPago('${qrId}')">💸 Pagar ahora</button>
+      `;
+    }
+
+    async function simularPago(qrId) {
+      const res = await fetch(`http://localhost:8080/simular-pago/alias/${qrId}`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": "Bearer mipassword123"
+        },
+        body: JSON.stringify({ cliente_alias: clienteAlias })
+      });
+
       const div = document.getElementById("resultado");
-      if (data.estado === "pagado") {
-        div.innerHTML = `✅ <strong>Pago recibido</strong><br>ID: ${id}`;
-        div.style.backgroundColor = "#d4edda";
-        div.style.color = "#155724";
-        div.style.border = "1px solid #c3e6cb";
+
+      if (res.status === 200) {
+        div.innerHTML += `
+          <p style="margin-top:1rem; color: green;">
+            ✅ Pago simulado exitosamente por <strong>${clienteAlias}</strong>
+          </p>
+        `;
       } else {
-        div.innerText = `Estado actual: ${data.estado}`;
-        div.removeAttribute("style");
+        const msg = await res.text();
+        alert("❌ No se pudo simular el pago: " + msg);
       }
     }
-
-    async function simularPago() {
-        const id = document.getElementById("qrId").value;
-        const clienteAlias = "cliente.demo";
-
-        if (!id || !clienteAlias) {
-            return alert("Completá el ID del QR y tu alias");
-        }
-
-        const res = await fetch(`http://localhost:8080/simular-pago/${id}`, {
-            method: "POST",
-            headers: {
-            "Content-Type": "application/json",
-            "Authorization": "Bearer mipassword123"
-            },
-            body: JSON.stringify({ cliente_alias: clienteAlias })
-        });
-
-        const div = document.getElementById("resultado");
-
-        if (res.status === 200) {
-            div.innerHTML = `✅ <strong>Pago simulado por ${clienteAlias}</strong><br>ID: ${id}`;
-            div.style.backgroundColor = "#d4edda";
-            div.style.color = "#155724";
-            div.style.border = "1px solid #c3e6cb";
-
-            setTimeout(() => consultarEstado(), 300);
-        } else {
-            const msg = await res.text();
-            alert("No se pudo simular el pago: " + msg);
-        }
-    }
-
   </script>
 </body>
 </html>

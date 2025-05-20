@@ -15,7 +15,6 @@ func main() {
 	db := utils.InitDB("../data/qr.db")
 	handlers.SetDB(db)
 
-	http.HandleFunc("/", handlers.RootHandler)
 	http.HandleFunc("/generar-qr", func(w http.ResponseWriter, r *http.Request) {
 		handlers.GenerarQRHandler(db, w, r)
 	})
@@ -32,6 +31,23 @@ func main() {
 		handlers.EliminarTransaccionHandler(db, w, r)
 	})
 
+	http.HandleFunc("/resolve-qr/", func(w http.ResponseWriter, r *http.Request) {
+		handlers.ResolveQRHandler(db, w, r)
+	})
+
+	http.HandleFunc("/webhook/pago", func(w http.ResponseWriter, r *http.Request) {
+		handlers.WebhookPagoHandler(db, w, r)
+	})
+
+	http.HandleFunc("/simular-pago/alias/", func(w http.ResponseWriter, r *http.Request) {
+		handlers.SimularPagoPorQRIDHandler(db, w, r)
+	})
+
+	http.Handle("/cliente-scan.html", http.FileServer(http.Dir("../frontend")))
+
+	http.HandleFunc("/", handlers.RootHandler)
+
 	fmt.Println("Servidor corriendo en http://localhost:8080")
-	log.Fatal(http.ListenAndServe(":8080", nil))
+	log.Fatal(http.ListenAndServe("0.0.0.0:8080", nil))
+
 }

@@ -58,7 +58,10 @@ func GenerarQRHandler(db *sql.DB, w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	payload := fmt.Sprintf("ALIAS:%s|MONTO:%.2f|REF:QR123", req.Alias, req.Monto)
+	// nuevo payload que contemple requisitos para homologacion
+	qrID := fmt.Sprintf("qr-%d", time.Now().UnixNano())
+	payload := utils.GenerarPayloadEMVCo(qrID, req.Alias, req.Monto)
+
 	png, err := qrcode.Encode(payload, qrcode.Medium, 256)
 	if err != nil {
 		http.Error(w, "Error generando QR", http.StatusInternalServerError)
@@ -68,11 +71,13 @@ func GenerarQRHandler(db *sql.DB, w http.ResponseWriter, r *http.Request) {
 	base64QR := base64.StdEncoding.EncodeToString(png)
 
 	res, err := db.Exec(`
-		INSERT INTO transacciones (alias, monto, payload, estado, creado_en)
-		VALUES (?, ?, ?, ?, ?)`,
-		req.Alias, req.Monto, payload, "pendiente", time.Now().Format(time.RFC3339),
+		INSERT INTO transacciones (alias, monto, payload, estado, creado_en, qr_id)
+		VALUES (?, ?, ?, ?, ?, ?)`,
+		req.Alias, req.Monto, payload, "pendiente", time.Now().Format(time.RFC3339), qrID,
 	)
+
 	if err != nil {
+		log.Println("❌ ERROR al insertar en la DB:", err)
 		http.Error(w, "Error al guardar en base de datos", http.StatusInternalServerError)
 		return
 	}
@@ -205,4 +210,119 @@ func EliminarTransaccionHandler(db *sql.DB, w http.ResponseWriter, r *http.Reque
 
 func RootHandler(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintln(w, "Servidor QR Interoperable activo 🚀")
+}
+
+func ResolveQRHandler(db *sql.DB, w http.ResponseWriter, r *http.Request) {
+	utils.SetCORSHeaders(w)
+
+	qrID := r.URL.Path[len("/resolve-qr/"):] // o usar utils.ParseIDFromURL si lo adaptás
+	log.Println("🔍 Resolviendo QR:", qrID)
+
+	if qrID == "" {
+		http.Error(w, "qr_id requerido", http.StatusBadRequest)
+		return
+	}
+
+	var alias string
+	var monto float64
+	err := db.QueryRow("SELECT alias, monto FROM transacciones WHERE qr_id = ?", qrID).Scan(&alias, &monto)
+	if err != nil {
+		http.Error(w, "QR no encontrado", http.StatusNotFound)
+		return
+	}
+
+	resp := map[string]interface{}{
+		"qr_id":  qrID,
+		"monto":  monto,
+		"moneda": "ARS",
+		"comercio": map[string]string{
+			"nombre":    "Pepoburger",
+			"cuit":      "20123456789",
+			"cbu":       "2850590940090418135201",
+			"rubro":     "4722",
+			"direccion": "Av. Siempre Viva 123",
+		},
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(resp)
+}
+
+func WebhookPagoHandler(db *sql.DB, w http.ResponseWriter, r *http.Request) {
+	log.Println("📩 Webhook recibido")
+
+	utils.SetCORSHeaders(w)
+
+	if r.Method != http.MethodPost {
+		http.Error(w, "Método no permitido", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var payload struct {
+		QRID   string  `json:"qr_id"`
+		Monto  float64 `json:"monto"`
+		Evento string  `json:"evento"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+		http.Error(w, "JSON inválido", http.StatusBadRequest)
+		return
+	}
+
+	// Confirmar existencia
+	var id int
+	err := db.QueryRow("SELECT id FROM transacciones WHERE qr_id = ?", payload.QRID).Scan(&id)
+	if err != nil {
+		http.Error(w, "QR no encontrado", http.StatusNotFound)
+		return
+	}
+
+	// Actualizar estado
+	_, err = db.Exec("UPDATE transacciones SET estado = 'pagado' WHERE qr_id = ?", payload.QRID)
+	if err != nil {
+		http.Error(w, "Error al actualizar estado", http.StatusInternalServerError)
+		return
+	}
+
+	fmt.Fprintf(w, "✅ Pago confirmado para %s\n", payload.QRID)
+}
+
+// Ahora simulo el pago con qr_id para homologar a newpay en vez de con un ID ej 41
+
+func SimularPagoPorQRIDHandler(db *sql.DB, w http.ResponseWriter, r *http.Request) {
+	utils.SetCORSHeaders(w)
+	if !utils.AuthorizeRequest(w, r) {
+		return
+	}
+
+	qrID := r.URL.Path[len("/simular-pago/alias/"):]
+
+	var id int
+	var estado string
+	err := db.QueryRow("SELECT id, estado FROM transacciones WHERE qr_id = ?", qrID).Scan(&id, &estado)
+	if err != nil {
+		http.Error(w, "QR no encontrado", http.StatusNotFound)
+		return
+	}
+
+	if estado != "pendiente" {
+		http.Error(w, "Transacción no puede ser pagada", http.StatusForbidden)
+		return
+	}
+
+	var body struct {
+		ClienteAlias string `json:"cliente_alias"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		http.Error(w, "Error al decodificar JSON", http.StatusBadRequest)
+		return
+	}
+
+	_, err = db.Exec("UPDATE transacciones SET estado = 'pagado', cliente_alias = ? WHERE id = ?", body.ClienteAlias, id)
+	if err != nil {
+		http.Error(w, "Error al actualizar estado", http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
 }

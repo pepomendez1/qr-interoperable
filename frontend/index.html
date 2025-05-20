@@ -141,8 +141,13 @@
         document.getElementById('qr').innerHTML = `
           <h3>QR generado (ID ${data.id}):</h3>
           <img src="data:image/png;base64,${data.qr_base64}" />
-          <p><b>Payload:</b> ${data.payload}</p>
+          <p><strong>QR ID:</strong> <code id="qrid">${extraerQRID(data.payload)}</code></p>
+          <details style="margin-top: 1rem;">
+            <summary style="cursor: pointer;">Ver payload EMVCo</summary>
+            <code style="word-break: break-word;">${data.payload}</code>
+          </details>
         `;
+
 
         document.getElementById('estado').innerText = 'Estado: pendiente';
         document.getElementById('acciones').innerHTML = `
@@ -215,76 +220,98 @@
     }
 
     async function mostrarUltimasTransacciones() {
-      const res = await fetch("http://localhost:8080/todas-transacciones", {
-        headers: { 'Authorization': 'Bearer mipassword123' }
-      });
-      const data = await res.json();
+      try {
+        const res = await fetch("http://localhost:8080/todas-transacciones", {
+          headers: { 'Authorization': 'Bearer mipassword123' }
+        });
 
-      const lista = document.getElementById("lista-transacciones");
-      lista.innerHTML = "";
-
-      const ultimas = data.slice(-5).reverse();
-
-      ultimas.forEach(tx => {
-        const li = document.createElement("li");
-
-        const estadoClass = {
-          "pendiente": "pendiente",
-          "pagado": "pagado",
-          "expirado": "expirado"
-        }[tx.Estado] || "pendiente";
-
-        let info = `
-          <div><strong>ID:</strong> ${tx.ID}</div>
-          <div><strong>Comercio:</strong> ${tx.Alias}</div>
-          <div><strong>Monto:</strong> $${tx.Monto}</div>
-          <div><strong>Estado:</strong> <span class="estado-badge ${estadoClass}">${tx.Estado}</span></div>
-        `;
-
-        if (tx.Estado === "pagado" && tx.ClienteAlias) {
-          info += `<div><strong>Cliente:</strong> ${tx.ClienteAlias}</div>`;
+        if (!res.ok) {
+          const msg = await res.text();
+          console.error("❌ Error al cargar transacciones:", msg);
+          return;
         }
 
-        li.innerHTML = info;
+        const data = await res.json();
 
-        if (tx.Estado === "pendiente") {
-          const btn = document.createElement("button");
-          btn.textContent = "Simular pago";
-          btn.onclick = async () => {
-            await fetch(`http://localhost:8080/simular-pago/${tx.ID}`, {
-              method: "POST",
+        if (!Array.isArray(data)) {
+          console.error("❌ Respuesta no es un array:", data);
+          return;
+        }
+
+        const lista = document.getElementById("lista-transacciones");
+        lista.innerHTML = "";
+
+        const ultimas = data.slice(-5).reverse();
+
+        ultimas.forEach(tx => {
+          const li = document.createElement("li");
+
+          const estadoClass = {
+            "pendiente": "pendiente",
+            "pagado": "pagado",
+            "expirado": "expirado"
+          }[tx.Estado] || "pendiente";
+
+          let info = `
+            <div><strong>ID:</strong> ${tx.ID}</div>
+            <div><strong>Comercio:</strong> ${tx.Alias}</div>
+            <div><strong>Monto:</strong> $${tx.Monto}</div>
+            <div><strong>Estado:</strong> <span class="estado-badge ${estadoClass}">${tx.Estado}</span></div>
+          `;
+
+          if (tx.Estado === "pagado" && tx.ClienteAlias) {
+            info += `<div><strong>Cliente:</strong> ${tx.ClienteAlias}</div>`;
+          }
+
+          li.innerHTML = info;
+
+          if (tx.Estado === "pendiente") {
+            const btn = document.createElement("button");
+            btn.textContent = "Simular pago";
+            btn.onclick = async () => {
+              await fetch(`http://localhost:8080/simular-pago/${tx.ID}`, {
+                method: "POST",
+                headers: {
+                  "Content-Type": "application/json",
+                  "Authorization": "Bearer mipassword123"
+                },
+                body: JSON.stringify({ cliente_alias: "cliente.index" })
+              });
+              mostrarUltimasTransacciones();
+              if (tx.ID === transaccionID) consultarEstado();
+            };
+            li.appendChild(btn);
+          }
+
+          const btnEliminar = document.createElement("button");
+          btnEliminar.textContent = "🗑️ Eliminar";
+          btnEliminar.onclick = async () => {
+            const confirmacion = confirm(`¿Seguro que querés eliminar la transacción ID ${tx.ID}?`);
+            if (!confirmacion) return;
+
+            await fetch(`http://localhost:8080/eliminar-transaccion/${tx.ID}`, {
+              method: "DELETE",
               headers: {
-                "Content-Type": "application/json",
                 "Authorization": "Bearer mipassword123"
-              },
-              body: JSON.stringify({ cliente_alias: "cliente.index" })
+              }
             });
+
             mostrarUltimasTransacciones();
-            if (tx.ID === transaccionID) consultarEstado();
           };
-          li.appendChild(btn);
-        }
+          li.appendChild(btnEliminar);
 
-        const btnEliminar = document.createElement("button");
-        btnEliminar.textContent = "🗑️ Eliminar";
-        btnEliminar.onclick = async () => {
-          const confirmacion = confirm(`¿Seguro que querés eliminar la transacción ID ${tx.ID}?`);
-          if (!confirmacion) return;
-
-          await fetch(`http://localhost:8080/eliminar-transaccion/${tx.ID}`, {
-            method: "DELETE",
-            headers: {
-              "Authorization": "Bearer mipassword123"
-            }
-          });
-
-          mostrarUltimasTransacciones();
-        };
-        li.appendChild(btnEliminar);
-
-        lista.appendChild(li);
-      });
+          lista.appendChild(li);
+        });
+      } catch (e) {
+        console.error("❌ Error inesperado al mostrar transacciones:", e);
+      }
     }
+
+    function extraerQRID(payload) {
+      const match = payload.match(/qr-\d+/);
+      return match ? match[0] : "(no encontrado)";
+    }
+
 
     setInterval(() => {
       if (transaccionID) consultarEstado();

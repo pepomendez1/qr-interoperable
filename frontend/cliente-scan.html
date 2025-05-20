@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <title>Escanear y Pagar QR</title>
+  <script src="https://unpkg.com/html5-qrcode" type="text/javascript"></script>
+  <style>
+    body {
+      font-family: 'Inter', sans-serif;
+      background-color: #f8f9fb;
+      color: #333;
+      padding: 2rem;
+      max-width: 600px;
+      margin: auto;
+    }
+    h1 {
+      color: #5f2eea;
+    }
+    #reader {
+      width: 100%;
+      margin-top: 1rem;
+    }
+    #resultado, #infoQR {
+      margin-top: 1rem;
+      padding: 1rem;
+      background-color: white;
+      border-radius: 8px;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+    }
+    button {
+      margin-top: 1rem;
+      padding: 0.75rem;
+      width: 100%;
+      background-color: #5f2eea;
+      color: white;
+      border: none;
+      border-radius: 8px;
+      font-size: 1rem;
+      cursor: pointer;
+    }
+  </style>
+</head>
+<body>
+  <h1>Escanear QR y Pagar</h1>
+  <p>Alias de esta billetera: <strong>cliente.demo</strong></p>
+
+  <div id="reader"></div>
+  <div id="infoQR"></div>
+  <div id="resultado"></div>
+
+  <script>
+    const clienteAlias = "cliente.demo";
+    const backendURL = "https://b728-152-168-87-11.ngrok-free.app";
+    let qrIdDetectado = null;
+
+   function extraerQRID(payload) {
+    const match = payload.match(/qr-\d{19}/); // solo qr- seguido de exactamente 19 dígitos
+    return match ? match[0] : null;
+    }
+
+    async function resolverYMostrar(qrId) {
+      const res = await fetch(`${backendURL}/resolve-qr/${qrId}`);
+      if (!res.ok) {
+        document.getElementById("infoQR").innerText = "QR no encontrado";
+        return;
+      }
+      const data = await res.json();
+      document.getElementById("infoQR").innerHTML = `
+        <p><strong>Comercio:</strong> ${data.comercio.nombre}</p>
+        <p><strong>Monto:</strong> $${data.monto}</p>
+        <button onclick="pagarQR('${qrId}')">💸 Pagar ahora</button>
+      `;
+    }
+
+    async function pagarQR(qrId) {
+      const res = await fetch(`${backendURL}/simular-pago/alias/${qrId}`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": "Bearer mipassword123"
+        },
+        body: JSON.stringify({ cliente_alias: clienteAlias })
+      });
+
+      const div = document.getElementById("resultado");
+      if (res.status === 200) {
+        div.innerText = "✅ Pago realizado correctamente";
+        div.style.backgroundColor = "#d4edda";
+        div.style.color = "#155724";
+        div.style.border = "1px solid #c3e6cb";
+      } else {
+        div.innerText = "❌ No se pudo procesar el pago";
+        div.style.backgroundColor = "#f8d7da";
+        div.style.color = "#721c24";
+        div.style.border = "1px solid #f5c6cb";
+      }
+    }
+
+    function onScanSuccess(decodedText, decodedResult) {
+      if (!qrIdDetectado) {
+        qrIdDetectado = extraerQRID(decodedText);
+        if (qrIdDetectado) {
+          document.getElementById("reader").innerHTML = "✅ QR detectado";
+          resolverYMostrar(qrIdDetectado);
+        } else {
+          document.getElementById("infoQR").innerText = "QR escaneado no contiene qr_id";
+        }
+      }
+    }
+
+    const html5QrcodeScanner = new Html5QrcodeScanner(
+      "reader", { fps: 10, qrbox: 250 }, false
+    );
+    html5QrcodeScanner.render(onScanSuccess);
+  </script>
+</body>
+</html>
