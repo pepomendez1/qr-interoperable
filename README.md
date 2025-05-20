@@ -85,6 +85,44 @@ Authorization: Bearer mipassword123
 
 --- 
 
+## 📱 Escanear y pagar desde el celular
+
+### 1. Generar un QR
+- Desde `index.html`, generar un QR como comercio.
+
+### 2. Iniciar el servidor
+Asegurarse de tener el archivo `cliente-scan.html` servido desde el backend:
+
+```go
+http.Handle("/cliente-scan.html", http.FileServer(http.Dir("./frontend")))
+```
+Y correr:
+```
+go run main.go
+```
+3. Exponer el backend con ngrok
+```
+ngrok http 8080
+```
+
+Se obtiene una URL pública HTTPS como:
+https://abc123.ngrok-free.app
+
+4. Acceder desde el celular
+En el navegador del celular, abrir:
+https://abc123.ngrok-free.app/cliente-scan.html
+Se activa la cámara
+
+Se escanea el QR generado
+
+Se extrae el qr_id
+
+Se resuelve y muestra el comercio y monto
+
+Botón “Pagar ahora” simula el webhook y marca el QR como pagado ✅
+
+---
+
 🛣 Roadmap
 🔄 Integración real con Newpay
 
